@@ -18,7 +18,7 @@
 #include <unistd.h>
 #include <sys/syscall.h>
 
- #include <bitset>
+#include <bitset>
 
 //My Additions
 typedef tuple<unsigned int, unsigned int, int, int> page_tuple; //page_number, threadid, rcount, wcount
@@ -30,6 +30,7 @@ FILE * trace;
 
 int rcount = 0;
 int wcount = 0;
+int start_logging = 0;
 stringstream buffer;
 
 long int *sz;
@@ -91,71 +92,79 @@ VOID RecordMemRead(VOID * ip, VOID * addr, THREADID threadid)
 {
     //buffer.clear();//clear any bits set
    // stringstream buffer;
-    PIN_GetLock(&lock, threadid+1);
-    buffer << addr;
 
-    string s = buffer.str();
-    s.insert(2, "0000");
-    s = s.substr(2, (s.length()-1));
-    //cout << "s: " << s << endl;
+    // start logging the accesses when thread 1 begins
+    if (threadid == 1) {
+        start_logging = 1;
+    }
 
-    string addr_binary = GetBinaryStringFromHexString(s);
+    if (start_logging == 1) {
 
+        PIN_GetLock(&lock, threadid+1);
+        buffer << addr;
 
-    string page_binary = bitset<64>(4096).to_string();
+        string s = buffer.str();
+        s.insert(2, "0000");
+        s = s.substr(2, (s.length()-1));
+        //cout << "s: " << s << endl;
 
-    unsigned long page_decimal = bitset<64>(page_binary).to_ulong();
-    unsigned long addr_decimal = bitset<64>(addr_binary).to_ulong();
-    //buffer << setw(16) << setfill('0') << addr;
+        string addr_binary = GetBinaryStringFromHexString(s);
 
-   // cout << "page_binary: " << page_binary << endl;
-   // cout << "addr_binary: " << addr_binary << endl;
-   // cout << "page_decimal: " << page_decimal << " addr_decimal: " << addr_decimal << endl;
+        //tracing at the page level, page = 4096 bytes
+        string page_binary = bitset<64>(4096).to_string();
 
-    //cout << "~page_binary: " << ~(page_decimal-1) << endl;
-    unsigned int virtual_page = (addr_decimal & ~(page_decimal-1));
-    //cout << "Shifting Right: " << (addr_decimal >> 12) << endl;
-    //cout << "virtual_page: " << virtual_page << endl;
-    //int page_number_divided = address / sz ;
-   // cout << "page_number_divided: " << page_number_divided << endl;
-   // cout << "buffer before: " << buffer.str() << " addr before: " << addr << endl;
+        unsigned long page_decimal = bitset<64>(page_binary).to_ulong();
+        unsigned long addr_decimal = bitset<64>(addr_binary).to_ulong();
+        //buffer << setw(16) << setfill('0') << addr;
 
-    //buffer << hex << setw(16) << setfill('0') << addr;
-    //buffer << buffer.str();
-   // string firstEightBits = buffer.str().substr(0,3);
-  //  unsigned int page_number = stoi(firstEightBits, 0, 16);
+       // cout << "page_binary: " << page_binary << endl;
+       // cout << "addr_binary: " << addr_binary << endl;
+       // cout << "page_decimal: " << page_decimal << " addr_decimal: " << addr_decimal << endl;
 
-   // cout << "buffer: " << buffer.str() << " firstEightBits: " << hex << firstEightBits << " page_number: " << page_number << " addr: " << addr << endl;
-   // cout << "size: " << page_v.size() << endl;
-   // if (page_v.size() <= 0){
-    //    rcount = 1;
-    //    page_v.push_back(make_tuple(virtual_page, PIN_ThreadId(), rcount, wcount));
-        //page_v.push_back(make_tuple(page_number, 1, count));
-    //}
+        //cout << "~page_binary: " << ~(page_decimal-1) << endl;
+        unsigned int virtual_page = (addr_decimal & ~(page_decimal-1));
+        //cout << "Shifting Right: " << (addr_decimal >> 12) << endl;
+        //cout << "virtual_page: " << virtual_page << endl;
+        //int page_number_divided = address / sz ;
+       // cout << "page_number_divided: " << page_number_divided << endl;
+       // cout << "buffer before: " << buffer.str() << " addr before: " << addr << endl;
 
-    int page_exist = 0;
+        //buffer << hex << setw(16) << setfill('0') << addr;
+        //buffer << buffer.str();
+       // string firstEightBits = buffer.str().substr(0,3);
+      //  unsigned int page_number = stoi(firstEightBits, 0, 16);
 
-    for (unsigned int i = 0; i < page_v.size(); i++)
-    {
-        //cout << "size: " << page_v.size() << endl;
-        if (get<0>(page_v.at(i)) == virtual_page && get<1>(page_v.at(i)) == PIN_ThreadId())
+       // cout << "buffer: " << buffer.str() << " firstEightBits: " << hex << firstEightBits << " page_number: " << page_number << " addr: " << addr << endl;
+       // cout << "size: " << page_v.size() << endl;
+       // if (page_v.size() <= 0){
+        //    rcount = 1;
+        //    page_v.push_back(make_tuple(virtual_page, PIN_ThreadId(), rcount, wcount));
+            //page_v.push_back(make_tuple(page_number, 1, count));
+        //}
+
+        int page_exist = 0;
+
+        for (unsigned int i = 0; i < page_v.size(); i++)
         {
-            get<2> (page_v.at(i)) = get<2> (page_v.at(i)) + 1;
-            page_exist = 1;
-            break;
-        } 
+            //cout << "size: " << page_v.size() << endl;
+            if (get<0>(page_v.at(i)) == virtual_page && get<1>(page_v.at(i)) == threadid)
+            {
+                get<2> (page_v.at(i)) = get<2> (page_v.at(i)) + 1;
+                page_exist = 1;
+                break;
+            } 
+        }
+
+        // page doesn't exist, add
+        if (page_exist == 0){
+            rcount = 1;
+            page_v.push_back(make_tuple(virtual_page, threadid, rcount, wcount));
+        }
+
+        page_exist = 0;
+        buffer.str("");
+        PIN_ReleaseLock(&lock);
     }
-
-    // page doesn't exist, add
-    if (page_exist == 0){
-        rcount = 1;
-        page_v.push_back(make_tuple(virtual_page, PIN_ThreadId(), rcount, wcount));
-    }
-
-    page_exist = 0;
-    buffer.str("");
-    PIN_ReleaseLock(&lock);
-
     //fprintf(trace,"%p: R %p\n", ip, addr);
 }
 
@@ -165,75 +174,83 @@ VOID RecordMemWrite(VOID * ip, VOID * addr, THREADID threadid)
    // buffer.clear();//clear any bits set
    // buffer.str(std::string());
     //stringstream buffer;
-    PIN_GetLock(&lock, threadid+1);
-    buffer << addr;
+    // start logging accesses when thread 1 begins
+    if (threadid == 1) {
+        start_logging = 1;
+    }
 
-    string s = buffer.str();
-    s.insert(2, "0000");
-    s = s.substr(2, (s.length()-1));
-   // cout << "s: " << s << endl;
+    if (start_logging == 1) {
 
-    string addr_binary = GetBinaryStringFromHexString(s);
+        PIN_GetLock(&lock, threadid+1);
+        buffer << addr;
 
+        string s = buffer.str();
+        s.insert(2, "0000");
+        s = s.substr(2, (s.length()-1));
+       // cout << "s: " << s << endl;
 
-    string page_binary = bitset<64>(4096).to_string();
-
-    unsigned long page_decimal = bitset<64>(page_binary).to_ulong();
-    unsigned long addr_decimal = bitset<64>(addr_binary).to_ulong();
-    //bitset<64> b(n);
-   //string addr_binary = bitset<64>(n).to_string();
-
-   // cout << "page_binary: " << page_binary << endl;
-    //cout << "addr_binary: " << addr_binary << endl;
-   // cout << "page_decimal: " << page_decimal << " addr_decimal: " << addr_decimal << endl;
-
-    //cout << "~page_binary: " << ~(page_decimal-1) << endl;
-    unsigned int virtual_page = (addr_decimal & ~(page_decimal-1));
-    //cout << "Shifting Right: " << (addr_decimal >> 12) << endl;
-    //cout << "virtual_page: " << virtual_page << endl;
-   // cout << "addr_binary: " << b.to_string() << endl;
-   // buffer << setw(16) << setfill('0') << addr;
+        string addr_binary = GetBinaryStringFromHexString(s);
 
 
-    //int page_number_divided = address / sz ;
-    //cout << "page_number_divided: " << page_number_divided << endl;
+        string page_binary = bitset<64>(4096).to_string();
 
-   // buffer << buffer.str();
-   // cout << "buffer before: " << buffer.str() << " addr before: " << addr << endl;
-   // buffer << hex << setw(16) << setfill('0') << addr;
-    //string firstEightBits = buffer.str().substr(0,3);
-    //unsigned int page_number = stoi(firstEightBits, 0, 16);
+        unsigned long page_decimal = bitset<64>(page_binary).to_ulong();
+        unsigned long addr_decimal = bitset<64>(addr_binary).to_ulong();
+        //bitset<64> b(n);
+       //string addr_binary = bitset<64>(n).to_string();
 
-   // cout << "buffer: " << buffer.str() << " firstEightBits: " << hex << firstEightBits << " page_number: " << page_number << " addr: " << addr << endl;
-    //  cout << "size: " << page_v.size() << endl;
-   // if (page_v.size() <= 0){
-    //    wcount = 1;
-    //    page_v.push_back(make_tuple(virtual_page, PIN_ThreadId(), rcount, wcount));
-        //page_v.push_back(make_tuple(page_number, 1, count));
-    //}
+       // cout << "page_binary: " << page_binary << endl;
+        //cout << "addr_binary: " << addr_binary << endl;
+       // cout << "page_decimal: " << page_decimal << " addr_decimal: " << addr_decimal << endl;
 
-    int page_exist = 0;
+        //cout << "~page_binary: " << ~(page_decimal-1) << endl;
+        unsigned int virtual_page = (addr_decimal & ~(page_decimal-1));
+        //cout << "Shifting Right: " << (addr_decimal >> 12) << endl;
+        //cout << "virtual_page: " << virtual_page << endl;
+       // cout << "addr_binary: " << b.to_string() << endl;
+       // buffer << setw(16) << setfill('0') << addr;
 
-    for (unsigned int i = 0; i < page_v.size(); i++)
-    {
-        //cout << "size: " << page_v.size() << endl;
-        if (get<0>(page_v.at(i)) == virtual_page && get<1>(page_v.at(i)) == PIN_ThreadId())
+
+        //int page_number_divided = address / sz ;
+        //cout << "page_number_divided: " << page_number_divided << endl;
+
+       // buffer << buffer.str();
+       // cout << "buffer before: " << buffer.str() << " addr before: " << addr << endl;
+       // buffer << hex << setw(16) << setfill('0') << addr;
+        //string firstEightBits = buffer.str().substr(0,3);
+        //unsigned int page_number = stoi(firstEightBits, 0, 16);
+
+       // cout << "buffer: " << buffer.str() << " firstEightBits: " << hex << firstEightBits << " page_number: " << page_number << " addr: " << addr << endl;
+        //  cout << "size: " << page_v.size() << endl;
+       // if (page_v.size() <= 0){
+        //    wcount = 1;
+        //    page_v.push_back(make_tuple(virtual_page, PIN_ThreadId(), rcount, wcount));
+            //page_v.push_back(make_tuple(page_number, 1, count));
+        //}
+
+        int page_exist = 0;
+
+        for (unsigned int i = 0; i < page_v.size(); i++)
         {
-            get<3> (page_v.at(i)) = get<3> (page_v.at(i)) + 1;
-            page_exist = 1;
-            break;
-        } 
-    }
+            //cout << "size: " << page_v.size() << endl;
+            if (get<0>(page_v.at(i)) == virtual_page && get<1>(page_v.at(i)) == PIN_ThreadId())
+            {
+                get<3> (page_v.at(i)) = get<3> (page_v.at(i)) + 1;
+                page_exist = 1;
+                break;
+            } 
+        }
 
-    // page doesn't exist, add
-    if (page_exist == 0){
-        wcount = 1;
-        page_v.push_back(make_tuple(virtual_page, PIN_ThreadId(), rcount, wcount));
-    }
+        // page doesn't exist, add
+        if (page_exist == 0){
+            wcount = 1;
+            page_v.push_back(make_tuple(virtual_page, PIN_ThreadId(), rcount, wcount));
+        }
 
-    page_exist = 0;
-    buffer.str("");
-    PIN_ReleaseLock(&lock);
+        page_exist = 0;
+        buffer.str("");
+        PIN_ReleaseLock(&lock);
+    }
     //fprintf(trace,"%p: W %p\n", ip, addr);
 }
 
