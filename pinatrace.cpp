@@ -144,6 +144,7 @@ VOID RecordMemRead(VOID * ip, VOID * addr, THREADID threadid)
 
         int page_exist = 0;
 
+        // check if the page exist and just increment the counter
         for (unsigned int i = 0; i < page_v.size(); i++)
         {
             //cout << "size: " << page_v.size() << endl;
@@ -230,6 +231,7 @@ VOID RecordMemWrite(VOID * ip, VOID * addr, THREADID threadid)
 
         int page_exist = 0;
 
+        // check if the page exist and just increment the counter
         for (unsigned int i = 0; i < page_v.size(); i++)
         {
             //cout << "size: " << page_v.size() << endl;
@@ -294,14 +296,17 @@ VOID Fini(INT32 code, VOID *v)
     ofstream myfile("memtracker.log");
     if (myfile.is_open()){
         for (unsigned int i = 0; i < page_v.size(); i++){
-            myfile << get<0>(page_v[i]) << ",";
-            myfile << get<1>(page_v[i]) << ",";
-            myfile << get<2>(page_v[i]) << ",";
-            myfile << get<3>(page_v[i]) << "\n";
+            // print only accesses whose read || write threshold exceeds a number i.e. 100
+            if (get<2>(page_v[i]) >= 100 || get<3>(page_v[i]) >= 100)
+            {
+                myfile << get<0>(page_v[i]) << ",";
+                myfile << get<1>(page_v[i]) << ",";
+                myfile << get<2>(page_v[i]) << ",";
+                myfile << get<3>(page_v[i]) << "\n";
+            }
         }
     }
     else cout << "Unable to open file";
-
     //fprintf(myfile, "#eof\n");
     //fclose(myfile);
 }
